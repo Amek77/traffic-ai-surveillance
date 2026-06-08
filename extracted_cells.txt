@@ -1,0 +1,180 @@
+--- CELL 20 ---
+def run_rule_engine(detections):
+    """
+    Input:  list of detections from YOLO
+    Output: violations dict with severity
+    """
+    violations    = []
+    severity      = "NONE"
+
+    helmet_count    = 0
+    no_helmet_count = 0
+    rider_count     = 0
+    plate_found     = False
+
+    for det in detections:
+        cls = det['class']
+        if cls == 'helmet'      : helmet_count    += 1
+        if cls == 'no_helmet'   : no_helmet_count += 1
+        if cls == 'rider'       : rider_count     += 1
+        if cls == 'number_plate': plate_found      = True
+
+    # Rule 1: No helmet
+    if no_helmet_count > 0:
+        violations.append("NO HELMET")
+
+    # Rule 2: Triple riding — proximity based (fixes false positives)
+    def check_triple_riding(detections, proximity=150):
+        riders = [d['bbox'] for d in detections if d['class'] == 'rider']
+
+        if len(riders) < 3:
+            return False
+
+        for i in range(len(riders)):
+            nearby = 0
+            rx = (riders[i][0] + riders[i][2]) / 2
+            ry = (riders[i][1] + riders[i][3]) / 2
+
+            for j in range(len(riders)):
+                if i == j: continue
+                ox = (riders[j][0] + riders[j][2]) / 2
+                oy = (riders[j][1] + riders[j][3]) / 2
+                dist = ((rx-ox)**2 + (ry-oy)**2) ** 0.5
+                if dist < proximity:
+                    nearby += 1
+
+            if nearby >= 2:
+                return True
+        return False
+
+    if check_triple_riding(detections):
+        violations.append("TRIPLE RIDING")
+
+    # Rule 3: Severity
+    if len(violations) == 0:
+        severity = "NONE"
+    elif "TRIPLE RIDING" in violations and "NO HELMET" in violations:
+        severity = "HIGH"
+    elif "TRIPLE RIDING" in violations:
+        severity = "MEDIUM"
+    elif "NO HELMET" in violations:
+        severity = "LOW"
+
+    return {
+        "violations"     : violations,
+        "severity"       : severity,
+        "helmet_count"   : helmet_count,
+        "no_helmet_count": no_helmet_count,
+        "rider_count"    : rider_count,
+        "plate_found"    : plate_found
+    }
+
+print("✅ Rule engine ready!")
+==================================================
+--- CELL 21 ---
+def run_full_pipeline(image_path, conf_threshold=0.25):
+    """
+    Complete pipeline:
+    Image → YOLO → OCR → HSRP → Rule Engine → Final Output
+    """
+    print(f"\n{'='*50}")
+    print(f"Processing: {os.path.basename(image_path)}")
+    print(f"{'='*50}")
+
+    # Read image
+    img_bgr = cv2.imread(image_path)
+    img_rgb = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2RGB)
+
+    # ── STEP 1: YOLO Detection ──────────────────────
+    results    = model(image_path, conf=conf_threshold, verbose=False)
+    boxes      = results[0].boxes
+    detections = []
+    plate_crop = None
+
+    for box in boxes:
+        cls_id   = int(box.cls)
+        conf     = float(box.conf)
+        cls_name = model.names[cls_id]
+        x1, y1, x2, y2 = map(int, box.xyxy[0])
+
+        detections.append({
+            'class': cls_name,
+            'conf' : conf,
+            'bbox' : (x1, y1, x2, y2)
+        })
+
+        # Crop plate for OCR + HSRP — tighter crop
+        if cls_name == 'number_plate':
+            height   = y2 - y1
+            width    = x2 - x1
+            y1_tight = y1 + int(height * 0.6)
+            x1_tight = x1 + int(width  * 0.1)
+            x2_tight = x2 - int(width  * 0.1)
+            plate_crop = img_rgb[y1_tight:y2, x1_tight:x2_tight]
+
+    print(f"\n📦 YOLO Detections ({len(detections)} found):")
+    for d in detections:
+        print(f"   {d['class']:15s} → conf: {d['conf']:.2f}")
+
+    # ── STEP 2: OCR on plate ────────────────────────
+    plate_number = "NOT FOUND"
+    if plate_crop is not None and plate_crop.size > 0:
+        ocr_results  = reader.readtext(plate_crop)
+        if ocr_results:
+            plate_number = max(ocr_results, key=lambda x: x[2])[1]
+            plate_number = plate_number.upper().replace(" ", "")
+        print(f"\n🔤 OCR Result: {plate_number}")
+    else:
+        print(f"\n🔤 OCR: No plate detected")
+
+    # ── STEP 3: HSRP Classification ─────────────────
+    hsrp_status = "UNKNOWN"
+    if plate_crop is not None and plate_crop.size > 0:
+        try:
+            pil_img    = Image.fromarray(plate_crop)
+            tensor     = hsrp_transform(pil_img).unsqueeze(0)
+            with torch.no_grad():
+                output = hsrp_model(tensor)
+                pred   = torch.argmax(output, dim=1).item()
+            hsrp_status = hsrp_classes[pred]
+        except:
+            hsrp_status = "UNKNOWN"
+        print(f"🪪  HSRP Status: {hsrp_status}")
+    else:
+        print(f"🪪  HSRP: No plate to classify")
+
+    # ── STEP 4: Rule Engine ─────────────────────────
+    rule_result = run_rule_engine(detections)
+
+    print(f"\n⚖️  Rule Engine Results:")
+    print(f"   Riders found     : {rule_result['rider_count']}")
+    print(f"   Helmet           : {rule_result['helmet_count']}")
+    print(f"   No Helmet        : {rule_result['no_helmet_count']}")
+    print(f"   Violations       : {rule_result['violations']}")
+    print(f"   Severity         : {rule_result['severity']}")
+
+    # ── STEP 5: Final Output ────────────────────────
+    final_output = {
+        "plate_number" : plate_number,
+        "hsrp_status"  : hsrp_status,
+        "helmet_status": "VIOLATION" if rule_result['no_helmet_count'] > 0 else "OK",
+        "triple_riding": "VIOLATION" if rule_result['rider_count'] >= 3 else "OK",
+        "violations"   : rule_result['violations'],
+        "severity"     : rule_result['severity']
+    }
+
+    print(f"\n{'='*50}")
+    print(f"   FINAL OUTPUT")
+    print(f"{'='*50}")
+    print(f"   🪖  Helmet Status : {final_output['helmet_status']}")
+    print(f"   👥  Triple Riding : {final_output['triple_riding']}")
+    print(f"   🪪  HSRP Status   : {final_output['hsrp_status']}")
+    print(f"   🔤  Plate Number  : {final_output['plate_number']}")
+    print(f"   ⚠️  Violations    : {final_output['violations']}")
+    print(f"   🚨  Severity      : {final_output['severity']}")
+    print(f"{'='*50}")
+
+    return final_output, results
+
+print("✅ Pipeline function ready!")
+==================================================
