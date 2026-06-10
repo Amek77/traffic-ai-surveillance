@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api/axios';
 import StatCard from '../components/StatCard';
@@ -7,7 +7,6 @@ import {
   ShieldAlert, 
   Flame, 
   CheckCircle,
-  Calendar,
   ChevronRight,
   TrendingUp,
   AlertTriangle
@@ -28,246 +27,7 @@ import {
   Line
 } from 'recharts';
 
-// CCTV Canvas Simulator
-const vehicleTypes = ['car', 'bike_ok', 'bike_viol', 'car'];
-const plates = ['DL 3C AQ 1234', 'HR 26 DK 5678', 'MH 02 BY 9999', 'KA 51 MB 4321', 'UP 16 CT 0001', 'GJ 01 ZY 7777'];
-const violationsList = ['NO HELMET', 'TRIPLE RIDING', 'NON HSRP'];
 
-const CCTVCanvas = ({ onAlert }) => {
-  const canvasRef = useRef(null);
-  
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    
-    let vehicles = [];
-    let animationFrameId;
-    let spawnTimer;
-
-    const spawnVehicle = () => {
-      const type = vehicleTypes[Math.floor(Math.random() * vehicleTypes.length)];
-      const plate = plates[Math.floor(Math.random() * plates.length)];
-      const hasViol = type === 'bike_viol';
-      const violations = hasViol ? [violationsList[Math.floor(Math.random() * 2)], 'NON HSRP'] : [];
-      
-      vehicles.push({
-        id: Math.random().toString(),
-        x: Math.random() > 0.5 ? 80 : 180,
-        y: 320,
-        speed: 1.2 + Math.random() * 1.2,
-        type,
-        plate,
-        violations,
-        detected: false
-      });
-    };
-
-    spawnVehicle();
-
-    spawnTimer = setInterval(() => {
-      if (vehicles.length < 3) {
-        spawnVehicle();
-      }
-    }, 4500);
-
-    const draw = () => {
-      ctx.fillStyle = '#0a0a14';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-      ctx.strokeStyle = 'var(--card-border)';
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.moveTo(30, 0); ctx.lineTo(30, 300);
-      ctx.moveTo(250, 0); ctx.lineTo(250, 300);
-      ctx.stroke();
-
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-      ctx.lineWidth = 2;
-      ctx.setLineDash([15, 15]);
-      ctx.beginPath();
-      ctx.moveTo(140, 0);
-      ctx.lineTo(140, 300);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      ctx.strokeStyle = 'var(--primary-glow)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(30, 120);
-      ctx.lineTo(250, 120);
-      ctx.stroke();
-
-      ctx.fillStyle = 'rgba(108, 62, 232, 0.08)';
-      ctx.fillRect(30, 100, 220, 20);
-      ctx.fillStyle = 'var(--primary-light)';
-      ctx.font = '8px monospace';
-      ctx.fillText('CHECKPOINT LINE - AI DETECTION', 65, 112);
-
-      vehicles = vehicles.filter(v => {
-        v.y -= v.speed;
-        const onScreen = v.y > -50;
-        
-        if (v.y <= 120 && !v.detected) {
-          v.detected = true;
-          onAlert({
-            id: v.id,
-            timestamp: new Date().toISOString(),
-            plateNumber: v.plate,
-            severity: v.violations.length > 0 ? 'HIGH' : 'NONE',
-            violations: v.violations,
-            hsrpStatus: v.violations.includes('NON HSRP') ? 'NON_HSRP' : 'HSRP'
-          });
-        }
-
-        if (onScreen) {
-          if (v.type === 'car') {
-            ctx.strokeStyle = '#3B82F6';
-            ctx.lineWidth = 1.5;
-            ctx.strokeRect(v.x - 15, v.y - 25, 30, 50);
-            ctx.fillStyle = 'rgba(59, 130, 246, 0.1)';
-            ctx.fillRect(v.x - 15, v.y - 25, 30, 50);
-            
-            ctx.fillStyle = '#3B82F6';
-            ctx.fillRect(v.x - 15, v.y - 35, 22, 10);
-            ctx.fillStyle = 'white';
-            ctx.font = '7px monospace';
-            ctx.fillText('CAR', v.x - 12, v.y - 27);
-          } else {
-            const isViol = v.type === 'bike_viol';
-            ctx.strokeStyle = isViol ? 'var(--severity-high)' : 'var(--severity-low)';
-            ctx.lineWidth = 1.5;
-            ctx.strokeRect(v.x - 12, v.y - 18, 24, 36);
-            ctx.fillStyle = isViol ? 'rgba(239, 68, 68, 0.1)' : 'rgba(34, 197, 94, 0.1)';
-            ctx.fillRect(v.x - 12, v.y - 18, 24, 36);
-
-            ctx.fillStyle = isViol ? 'var(--severity-high)' : 'var(--severity-low)';
-            ctx.fillRect(v.x - 12, v.y - 28, 24, 10);
-            ctx.fillStyle = 'white';
-            ctx.font = '7px monospace';
-            ctx.fillText(isViol ? 'VIOL' : 'OK', v.x - 9, v.y - 20);
-
-            if (isViol && v.y < 160 && v.y > 80) {
-              ctx.strokeStyle = 'var(--severity-high)';
-              ctx.lineWidth = 1;
-              ctx.beginPath();
-              ctx.arc(v.x, v.y - 6, 5, 0, Math.PI * 2);
-              ctx.stroke();
-            }
-          }
-        }
-        return onScreen;
-      });
-
-      animationFrameId = requestAnimationFrame(draw);
-    };
-
-    draw();
-
-    return () => {
-      cancelAnimationFrame(animationFrameId);
-      clearInterval(spawnTimer);
-    };
-  }, [onAlert]);
-
-  return (
-    <div style={{ position: 'relative', background: '#04040a', borderRadius: '12px', border: '1px solid var(--card-border)', overflow: 'hidden' }}>
-      <canvas 
-        ref={canvasRef} 
-        width={280} 
-        height={260} 
-        style={{ display: 'block', width: '100%', height: '260px' }} 
-      />
-      <div style={{
-        position: 'absolute',
-        top: '10px',
-        left: '10px',
-        background: 'rgba(0,0,0,0.6)',
-        color: '#ef4444',
-        padding: '3px 8px',
-        borderRadius: '4px',
-        fontSize: '0.65rem',
-        fontWeight: 'bold',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '4px',
-        letterSpacing: '0.5px'
-      }}>
-        <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ef4444', display: 'inline-block' }}></span>
-        <span>CCTV SIMULATOR</span>
-      </div>
-    </div>
-  );
-};
-
-// Alert Feed Ticker
-const AlertTicker = ({ alerts }) => {
-  return (
-    <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      height: '260px',
-      background: 'var(--card-bg)',
-      border: '1px solid var(--card-border)',
-      borderRadius: '12px',
-      padding: '16px',
-      overflow: 'hidden'
-    }}>
-      <h3 style={{ fontSize: '0.9rem', fontWeight: 600, marginBottom: '12px', color: 'var(--text-primary)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span>Real-Time Alert Feed</span>
-        <span style={{ fontSize: '0.65rem', color: 'var(--primary-light)', background: 'rgba(139, 92, 246, 0.1)', padding: '2px 8px', borderRadius: '20px' }}>
-          Active
-        </span>
-      </h3>
-
-      <div style={{
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '10px',
-        overflowY: 'auto',
-        flex: 1,
-        paddingRight: '4px'
-      }}>
-        {alerts.slice(0, 10).map((alert, index) => {
-          const isViol = alert.violations.length > 0;
-          return (
-            <div 
-              key={alert.id + index}
-              style={{
-                background: isViol ? 'rgba(239, 68, 68, 0.05)' : 'rgba(34, 197, 94, 0.03)',
-                borderLeft: `3px solid ${isViol ? 'var(--severity-high)' : 'var(--severity-low)'}`,
-                padding: '8px 12px',
-                borderRadius: '4px',
-                fontSize: '0.75rem',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                animation: 'fadeIn 0.3s ease'
-              }}
-            >
-              <div>
-                <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>
-                  {alert.plateNumber}
-                </div>
-                <div style={{ color: 'var(--text-muted)', fontSize: '0.7rem', marginTop: '2px' }}>
-                  {isViol ? alert.violations.join(' | ') : 'NO VIOLATION'}
-                </div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <span className={`badge badge-${alert.severity.toLowerCase()}`} style={{ fontSize: '0.6rem', padding: '1px 6px' }}>
-                  {alert.severity}
-                </span>
-                <div style={{ color: 'var(--text-muted)', fontSize: '0.65rem', marginTop: '2px' }}>
-                  {new Date(alert.timestamp).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
 
 // Mock datasets for offline development / fallback
 const MOCK_SUMMARY = { total: 1248, today: 85, high: 234, medium: 412, low: 602 };
@@ -307,6 +67,347 @@ const COLORS_SEVERITY = {
 
 const COLORS_TYPES = ['#6C3EE8', '#3B82F6', '#10B981'];
 
+const ModelPerformanceView = () => {
+  const [selectedGraph, setSelectedGraph] = useState(null);
+
+  const graphs = [
+    {
+      id: 'results',
+      title: 'YOLOv8 Training Progress & Loss',
+      src: '/model_graphs/results.png',
+      description: 'Tracks bounding box regression loss, classification loss, and performance metrics (Precision, Recall, mAP50, mAP50-95) across 30 epochs of training. It shows stable convergence without overfitting.',
+      model: 'YOLOv8s Object Detector'
+    },
+    {
+      id: 'confusion',
+      title: 'YOLOv8 Confusion Matrix',
+      src: '/model_graphs/confusion_matrix.png',
+      description: 'Displays per-class accuracy and misclassification rates, helping identify overlap between riders, helmets, and plates. Higher diagonal values represent correct predictions.',
+      model: 'YOLOv8s Object Detector'
+    },
+    {
+      id: 'pr_curve',
+      title: 'Precision-Recall Curve',
+      src: '/model_graphs/BoxPR_curve.png',
+      description: 'Plots precision against recall. The area under the curve (AUC) represents the average precision (AP) for each category. Higher area indicates a more robust detector.',
+      model: 'YOLOv8s Object Detector'
+    },
+    {
+      id: 'f1_curve',
+      title: 'F1-Confidence Curve',
+      src: '/model_graphs/BoxF1_curve.png',
+      description: 'F1 score (harmonic mean of precision and recall) plotted against confidence thresholds, indicating the optimal confidence threshold (typically ~0.25 - 0.40) for peak detection performance.',
+      model: 'YOLOv8s Object Detector'
+    }
+  ];
+
+  return (
+    <div style={{ animation: 'fadeIn 0.4s ease' }}>
+      {/* Model Overview Section */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+        gap: '24px',
+        marginBottom: '32px'
+      }}>
+        {/* YOLOv8 Card */}
+        <div style={{
+          background: 'var(--card-bg)',
+          border: '1px solid var(--card-border)',
+          borderRadius: '12px',
+          padding: '24px',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          position: 'relative',
+          overflow: 'hidden'
+        }}>
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            right: 0,
+            width: '120px',
+            height: '120px',
+            background: 'radial-gradient(circle, rgba(139, 92, 246, 0.08) 0%, transparent 70%)',
+            pointerEvents: 'none'
+          }} />
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+              <span style={{
+                background: 'rgba(139, 92, 246, 0.15)',
+                color: 'var(--primary-light)',
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: '0.75rem',
+                fontWeight: 'bold',
+                textTransform: 'uppercase'
+              }}>YOLOv8s</span>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-primary)' }}>Object Detection Model</h3>
+            </div>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: '20px' }}>
+              Core neural network trained to recognize multi-class features in traffic images. Responsible for locating vehicle riders, helmets, no-helmets, and license plates.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '0.8rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '6px' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Weights File</span>
+                <span style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>best.pt (22.5 MB)</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '6px' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Input Resolution</span>
+                <span style={{ color: 'var(--text-primary)' }}>640 &times; 640 px</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '6px' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Classes Tracked</span>
+                <span style={{ color: 'var(--text-primary)', fontWeight: 500 }}>Helmet, No Helmet, Rider, Number Plate</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* HSRP MobileNetV2 Card */}
+        <div style={{
+          background: 'var(--card-bg)',
+          border: '1px solid var(--card-border)',
+          borderRadius: '12px',
+          padding: '24px',
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'space-between',
+          position: 'relative',
+          overflow: 'hidden'
+        }}>
+          <div style={{
+            position: 'absolute',
+            top: 0,
+            right: 0,
+            width: '120px',
+            height: '120px',
+            background: 'radial-gradient(circle, rgba(16, 185, 129, 0.08) 0%, transparent 70%)',
+            pointerEvents: 'none'
+          }} />
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '16px' }}>
+              <span style={{
+                background: 'rgba(16, 185, 129, 0.15)',
+                color: '#10B981',
+                padding: '6px 12px',
+                borderRadius: '6px',
+                fontSize: '0.75rem',
+                fontWeight: 'bold',
+                textTransform: 'uppercase'
+              }}>MobileNetV2</span>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: 'var(--text-primary)' }}>HSRP License Plate Classifier</h3>
+            </div>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.6, marginBottom: '20px' }}>
+              Lightweight deep convolutional neural network fine-tuned specifically to evaluate cropped license plate images. Classifies plates into HSRP standard or non-HSRP style.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '0.8rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '6px' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Weights File</span>
+                <span style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>hsrp_classifier.pth (9.1 MB)</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '6px' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Input Resolution</span>
+                <span style={{ color: 'var(--text-primary)' }}>224 &times; 224 px</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid rgba(255,255,255,0.05)', paddingBottom: '6px' }}>
+                <span style={{ color: 'var(--text-muted)' }}>Classes Tracked</span>
+                <span style={{ color: '#10B981', fontWeight: 600 }}>HSRP (Compliant), Non-HSRP (Violation)</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Graphs Grid */}
+      <h3 style={{ fontSize: '1.1rem', fontWeight: 600, marginBottom: '18px', color: 'var(--text-primary)' }}>
+        Model Performance Curves & Validation Graphs
+      </h3>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+        gap: '24px',
+        marginBottom: '40px'
+      }}>
+        {graphs.map((g) => (
+          <div 
+            key={g.id}
+            onClick={() => setSelectedGraph(g)}
+            style={{
+              background: 'var(--card-bg)',
+              border: '1px solid var(--card-border)',
+              borderRadius: '12px',
+              padding: '16px',
+              cursor: 'pointer',
+              transition: 'transform 0.25s ease, border-color 0.25s ease',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '12px'
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.transform = 'translateY(-4px)';
+              e.currentTarget.style.borderColor = 'var(--primary-light)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.transform = 'none';
+              e.currentTarget.style.borderColor = 'var(--card-border)';
+            }}
+          >
+            <div style={{
+              width: '100%',
+              height: '180px',
+              borderRadius: '8px',
+              background: '#070712',
+              overflow: 'hidden',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              border: '1px solid rgba(255,255,255,0.03)'
+            }}>
+              <img 
+                src={g.src} 
+                alt={g.title} 
+                style={{
+                  maxWidth: '100%',
+                  maxHeight: '100%',
+                  objectFit: 'contain'
+                }}
+                onError={(e) => {
+                  e.target.style.display = 'none';
+                  const parent = e.target.parentNode;
+                  parent.innerHTML = '<span style="color:var(--text-muted);font-size:0.75rem;">Graph placeholder</span>';
+                }}
+              />
+            </div>
+            <div>
+              <div style={{ fontSize: '0.65rem', color: 'var(--primary-light)', fontWeight: 'bold', textTransform: 'uppercase', marginBottom: '4px' }}>
+                {g.model}
+              </div>
+              <h4 style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '6px' }}>{g.title}</h4>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden', lineHeight: 1.4 }}>
+                {g.description}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Lightbox Modal */}
+      {selectedGraph && (
+        <div 
+          onClick={() => setSelectedGraph(null)}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh',
+            background: 'rgba(5, 5, 12, 0.92)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '24px',
+            animation: 'fadeIn 0.2s ease',
+            backdropFilter: 'blur(8px)'
+          }}
+        >
+          <div 
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: '#0d0d1e',
+              border: '1px solid var(--card-border)',
+              borderRadius: '16px',
+              maxWidth: '850px',
+              width: '100%',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.5)'
+            }}
+          >
+            {/* Modal Header */}
+            <div style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '16px 24px',
+              borderBottom: '1px solid rgba(255,255,255,0.05)'
+            }}>
+              <div>
+                <span style={{ fontSize: '0.65rem', color: 'var(--primary-light)', fontWeight: 'bold', textTransform: 'uppercase' }}>
+                  {selectedGraph.model}
+                </span>
+                <h4 style={{ fontSize: '1.05rem', fontWeight: 600, color: 'var(--text-primary)', marginTop: '2px' }}>
+                  {selectedGraph.title}
+                </h4>
+              </div>
+              <button 
+                onClick={() => setSelectedGraph(null)}
+                style={{
+                  background: 'rgba(255,255,255,0.05)',
+                  border: 'none',
+                  color: 'var(--text-primary)',
+                  fontSize: '1.5rem',
+                  cursor: 'pointer',
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '50%',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'background 0.2s',
+                  lineHeight: '1'
+                }}
+                onMouseEnter={(e) => e.target.style.background = 'rgba(255,255,255,0.1)'}
+                onMouseLeave={(e) => e.target.style.background = 'rgba(255,255,255,0.05)'}
+              >
+                &times;
+              </button>
+            </div>
+
+            {/* Modal Image Area */}
+            <div style={{
+              background: '#05050c',
+              padding: '24px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              maxHeight: '450px',
+              overflow: 'hidden'
+            }}>
+              <img 
+                src={selectedGraph.src} 
+                alt={selectedGraph.title} 
+                style={{
+                  maxWidth: '100%',
+                  maxHeight: '400px',
+                  objectFit: 'contain',
+                  borderRadius: '4px'
+                }}
+              />
+            </div>
+
+            {/* Modal Description */}
+            <div style={{
+              padding: '20px 24px',
+              background: '#0d0d1e',
+              borderTop: '1px solid rgba(255,255,255,0.05)'
+            }}>
+              <h5 style={{ fontSize: '0.8rem', fontWeight: 'bold', color: 'var(--text-secondary)', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                Analysis & Interpretation
+              </h5>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                {selectedGraph.description}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 const Dashboard = () => {
   const [summary, setSummary] = useState(MOCK_SUMMARY);
   const [byType, setByType] = useState(MOCK_BY_TYPE);
@@ -315,7 +416,7 @@ const Dashboard = () => {
   const [recentViolations, setRecentViolations] = useState(MOCK_RECENT_VIOLATIONS);
   const [isLoading, setIsLoading] = useState(true);
   const [isUsingMock, setIsUsingMock] = useState(false);
-  const [liveAlerts, setLiveAlerts] = useState(MOCK_RECENT_VIOLATIONS);
+  const [activeTab, setActiveTab] = useState('live');
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -390,43 +491,7 @@ const Dashboard = () => {
     fetchDashboardData();
   }, []);
 
-  const handleLiveAlert = (newAlert) => {
-    setLiveAlerts(prev => [newAlert, ...prev]);
 
-    if (newAlert.violations.length > 0) {
-      setSummary(prev => {
-        const nextSummary = { ...prev };
-        nextSummary.total += 1;
-        nextSummary.today += 1;
-        if (newAlert.severity === 'HIGH') {
-          nextSummary.high += 1;
-        } else if (newAlert.severity === 'LOW') {
-          nextSummary.low += 1;
-        } else {
-          nextSummary.medium += 1;
-        }
-        return nextSummary;
-      });
-
-      setByType(prev => {
-        return prev.map(t => {
-          if (newAlert.violations.includes(t.name)) {
-            return { ...t, value: t.value + 1 };
-          }
-          return t;
-        });
-      });
-
-      setBySeverity(prev => {
-        return prev.map(s => {
-          if (s.name === newAlert.severity) {
-            return { ...s, value: s.value + 1 };
-          }
-          return s;
-        });
-      });
-    }
-  };
 
   const formatDate = (dateStr) => {
     try {
@@ -440,7 +505,7 @@ const Dashboard = () => {
 
   return (
     <div className="page-wrapper">
-      <div className="page-header" style={{ marginBottom: '25px' }}>
+      <div className="page-header" style={{ marginBottom: '20px' }}>
         <div className="page-title-section">
           <h1>Analytics Dashboard</h1>
           <p>Real-time traffic safety indicators and system telemetry</p>
@@ -464,203 +529,248 @@ const Dashboard = () => {
         )}
       </div>
 
-      {/* CCTV & Live alert grid */}
-      <section style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-        gap: '24px',
-        marginBottom: '32px'
+      {/* Sleek Tab Navigation */}
+      <div className="dashboard-tabs" style={{
+        display: 'flex',
+        gap: '8px',
+        marginBottom: '28px',
+        paddingBottom: '2px',
+        borderBottom: '1px solid var(--card-border)'
       }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <CCTVCanvas onAlert={handleLiveAlert} />
-        </div>
-        <div>
-          <AlertTicker alerts={liveAlerts} />
-        </div>
-      </section>
-
-      {/* 4 Stat Cards */}
-      <section className="stats-container">
-        <StatCard 
-          icon={FileSpreadsheet} 
-          value={summary.total} 
-          label="Total Violations" 
-          theme="purple" 
-        />
-        <StatCard 
-          icon={TrendingUp} 
-          value={summary.today} 
-          label="Today's Detections" 
-          theme="blue" 
-        />
-        <StatCard 
-          icon={Flame} 
-          value={summary.high} 
-          label="High Severity" 
-          theme="red" 
-        />
-        <StatCard 
-          icon={CheckCircle} 
-          value={summary.low} 
-          label="Low Severity" 
-          theme="green" 
-        />
-      </section>
-
-      {/* Chart Grid */}
-      <div className="dashboard-grid">
-        {/* Pie Chart: Types */}
-        <div className="chart-card col-6">
-          <h3 className="chart-card-title">Violation Breakdown by Type</h3>
-          <div className="chart-container">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={byType}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={90}
-                  paddingAngle={4}
-                  dataKey="value"
-                >
-                  {byType.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS_TYPES[index % COLORS_TYPES.length]} />
-                  ))}
-                </Pie>
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#111122', borderColor: '#1e1e36', borderRadius: '8px' }} 
-                  itemStyle={{ color: '#f3f4f6' }}
-                />
-                <Legend 
-                  verticalAlign="bottom" 
-                  height={36} 
-                  iconType="circle"
-                  formatter={(value) => <span style={{ color: '#9ca3af', fontSize: '0.85rem' }}>{value}</span>}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Bar Chart: Severity */}
-        <div className="chart-card col-6">
-          <h3 className="chart-card-title">Violations by Severity</h3>
-          <div className="chart-container">
-            <ResponsiveContainer width="100%" height="100%">
-              <RechartsBarChart data={bySeverity} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e1e36" vertical={false} />
-                <XAxis dataKey="name" stroke="#6b7280" fontSize={11} tickLine={false} />
-                <YAxis stroke="#6b7280" fontSize={11} tickLine={false} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#111122', borderColor: '#1e1e36', borderRadius: '8px' }} 
-                  itemStyle={{ color: '#f3f4f6' }}
-                  cursor={{ fill: 'rgba(255, 255, 255, 0.02)' }}
-                />
-                <Bar dataKey="value" radius={[6, 6, 0, 0]}>
-                  {bySeverity.map((entry, index) => {
-                    const sevColor = COLORS_SEVERITY[entry.name.toUpperCase()] || '#6C3EE8';
-                    return <Cell key={`cell-${index}`} fill={sevColor} />;
-                  })}
-                </Bar>
-              </RechartsBarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        {/* Line Chart: Daily Trend */}
-        <div className="chart-card col-12">
-          <h3 className="chart-card-title">Daily Violation Trend (Last 7 Days)</h3>
-          <div className="chart-container" style={{ height: '260px' }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <RechartsLineChart data={dailyTrend} margin={{ top: 10, right: 20, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#1e1e36" />
-                <XAxis dataKey="date" stroke="#6b7280" fontSize={11} tickLine={false} />
-                <YAxis stroke="#6b7280" fontSize={11} tickLine={false} />
-                <Tooltip 
-                  contentStyle={{ backgroundColor: '#111122', borderColor: '#1e1e36', borderRadius: '8px' }} 
-                  itemStyle={{ color: '#f3f4f6' }}
-                />
-                <Line 
-                  type="monotone" 
-                  dataKey="count" 
-                  stroke="#8b5cf6" 
-                  strokeWidth={3} 
-                  dot={{ fill: '#6C3EE8', r: 4, strokeWidth: 2 }} 
-                  activeDot={{ r: 6, strokeWidth: 0 }}
-                />
-              </RechartsLineChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
+        <button 
+          onClick={() => setActiveTab('live')}
+          style={{
+            padding: '10px 20px',
+            background: activeTab === 'live' ? 'rgba(108, 62, 232, 0.08)' : 'transparent',
+            border: 'none',
+            borderBottom: activeTab === 'live' ? '3px solid var(--primary-light)' : '3px solid transparent',
+            color: activeTab === 'live' ? 'var(--text-primary)' : 'var(--text-muted)',
+            fontWeight: 600,
+            fontSize: '0.9rem',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            borderRadius: '6px 6px 0 0'
+          }}
+        >
+          <TrendingUp size={16} />
+          Live Operations & Analytics
+        </button>
+        <button 
+          onClick={() => setActiveTab('model')}
+          style={{
+            padding: '10px 20px',
+            background: activeTab === 'model' ? 'rgba(108, 62, 232, 0.08)' : 'transparent',
+            border: 'none',
+            borderBottom: activeTab === 'model' ? '3px solid var(--primary-light)' : '3px solid transparent',
+            color: activeTab === 'model' ? 'var(--text-primary)' : 'var(--text-muted)',
+            fontWeight: 600,
+            fontSize: '0.9rem',
+            cursor: 'pointer',
+            transition: 'all 0.2s ease',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            borderRadius: '6px 6px 0 0'
+          }}
+        >
+          <ShieldAlert size={16} />
+          AI Model Performance & Curves
+        </button>
       </div>
 
-      {/* Recent Violations Panel */}
-      <section className="recent-violations-panel">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <h3 style={{ fontSize: '1.1rem', fontWeight: 600 }}>Recent Violation Incidents</h3>
-          <Link to="/violations" className="table-view-more">
-            <span>View All Records</span>
-            <ChevronRight size={16} />
-          </Link>
-        </div>
+      {activeTab === 'live' ? (
+        <>
 
-        <div className="table-wrapper">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Timestamp</th>
-                <th>Plate Number</th>
-                <th>Severity</th>
-                <th>HSRP Standard</th>
-                <th>Violations</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentViolations && recentViolations.length > 0 ? (
-                recentViolations.map((v) => {
-                  const isHsrp = v.hsrpStatus === 'HSRP' || v.hsrpStatus === true || v.hsrpStatus?.toString()?.toUpperCase() === 'COMPLIANT';
-                  return (
-                    <tr key={v.id}>
-                      <td style={{ color: 'var(--text-secondary)' }}>{formatDate(v.timestamp)}</td>
-                      <td style={{ fontWeight: 600, letterSpacing: '0.5px' }}>{v.plateNumber || 'N/A'}</td>
-                      <td>
-                        <span className={`badge badge-${v.severity?.toLowerCase() || 'none'}`}>
-                          {v.severity || 'NONE'}
-                        </span>
-                      </td>
-                      <td>
-                        <span className={`hsrp-status-badge ${isHsrp ? 'hsrp-compliant' : 'hsrp-non-compliant'}`} style={{ padding: '2px 8px', fontSize: '0.75rem' }}>
-                          {isHsrp ? 'Compliant' : 'Non-HSRP'}
-                        </span>
-                      </td>
-                      <td>
-                        <div className="table-badge-list">
-                          {v.violations && v.violations.length > 0 ? (
-                            v.violations.map((tag, i) => (
-                              <span key={i} className="table-tag">{tag}</span>
-                            ))
-                          ) : (
-                            <span className="table-tag" style={{ color: 'var(--severity-low)', borderColor: 'rgba(34, 197, 94, 0.2)', background: 'rgba(34, 197, 94, 0.05)' }}>
-                              NONE
+
+          {/* 4 Stat Cards */}
+          <section className="stats-container">
+            <StatCard 
+              icon={FileSpreadsheet} 
+              value={summary.total} 
+              label="Total Violations" 
+              theme="purple" 
+            />
+            <StatCard 
+              icon={TrendingUp} 
+              value={summary.today} 
+              label="Today's Detections" 
+              theme="blue" 
+            />
+            <StatCard 
+              icon={Flame} 
+              value={summary.high} 
+              label="High Severity" 
+              theme="red" 
+            />
+            <StatCard 
+              icon={CheckCircle} 
+              value={summary.low} 
+              label="Low Severity" 
+              theme="green" 
+            />
+          </section>
+
+          {/* Chart Grid */}
+          <div className="dashboard-grid">
+            {/* Pie Chart: Types */}
+            <div className="chart-card col-6">
+              <h3 className="chart-card-title">Violation Breakdown by Type</h3>
+              <div className="chart-container">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={byType}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={90}
+                      paddingAngle={4}
+                      dataKey="value"
+                    >
+                      {byType.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS_TYPES[index % COLORS_TYPES.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#111122', borderColor: '#1e1e36', borderRadius: '8px' }} 
+                      itemStyle={{ color: '#f3f4f6' }}
+                    />
+                    <Legend 
+                      verticalAlign="bottom" 
+                      height={36} 
+                      iconType="circle"
+                      formatter={(value) => <span style={{ color: '#9ca3af', fontSize: '0.85rem' }}>{value}</span>}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Bar Chart: Severity */}
+            <div className="chart-card col-6">
+              <h3 className="chart-card-title">Violations by Severity</h3>
+              <div className="chart-container">
+                <ResponsiveContainer width="100%" height="100%">
+                  <RechartsBarChart data={bySeverity} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e1e36" vertical={false} />
+                    <XAxis dataKey="name" stroke="#6b7280" fontSize={11} tickLine={false} />
+                    <YAxis stroke="#6b7280" fontSize={11} tickLine={false} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#111122', borderColor: '#1e1e36', borderRadius: '8px' }} 
+                      itemStyle={{ color: '#f3f4f6' }}
+                      cursor={{ fill: 'rgba(255, 255, 255, 0.02)' }}
+                    />
+                    <Bar dataKey="value" radius={[6, 6, 0, 0]}>
+                      {bySeverity.map((entry, index) => {
+                        const sevColor = COLORS_SEVERITY[entry.name.toUpperCase()] || '#6C3EE8';
+                        return <Cell key={`cell-${index}`} fill={sevColor} />;
+                      })}
+                    </Bar>
+                  </RechartsBarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Line Chart: Daily Trend */}
+            <div className="chart-card col-12">
+              <h3 className="chart-card-title">Daily Violation Trend (Last 7 Days)</h3>
+              <div className="chart-container" style={{ height: '260px' }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <RechartsLineChart data={dailyTrend} margin={{ top: 10, right: 20, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e1e36" />
+                    <XAxis dataKey="date" stroke="#6b7280" fontSize={11} tickLine={false} />
+                    <YAxis stroke="#6b7280" fontSize={11} tickLine={false} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#111122', borderColor: '#1e1e36', borderRadius: '8px' }} 
+                      itemStyle={{ color: '#f3f4f6' }}
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="count" 
+                      stroke="#8b5cf6" 
+                      strokeWidth={3} 
+                      dot={{ fill: '#6C3EE8', r: 4, strokeWidth: 2 }} 
+                      activeDot={{ r: 6, strokeWidth: 0 }}
+                    />
+                  </RechartsLineChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+
+          {/* Recent Violations Panel */}
+          <section className="recent-violations-panel">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 600 }}>Recent Violation Incidents</h3>
+              <Link to="/violations" className="table-view-more">
+                <span>View All Records</span>
+                <ChevronRight size={16} />
+              </Link>
+            </div>
+
+            <div className="table-wrapper">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Timestamp</th>
+                    <th>Plate Number</th>
+                    <th>Severity</th>
+                    <th>HSRP Standard</th>
+                    <th>Violations</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentViolations && recentViolations.length > 0 ? (
+                    recentViolations.map((v) => {
+                      const isHsrp = v.hsrpStatus === 'HSRP' || v.hsrpStatus === true || v.hsrpStatus?.toString()?.toUpperCase() === 'COMPLIANT';
+                      return (
+                        <tr key={v.id}>
+                          <td style={{ color: 'var(--text-secondary)' }}>{formatDate(v.timestamp)}</td>
+                          <td style={{ fontWeight: 600, letterSpacing: '0.5px' }}>{v.plateNumber || 'N/A'}</td>
+                          <td>
+                            <span className={`badge badge-${v.severity?.toLowerCase() || 'none'}`}>
+                              {v.severity || 'NONE'}
                             </span>
-                          )}
-                        </div>
+                          </td>
+                          <td>
+                            <span className={`hsrp-status-badge ${isHsrp ? 'hsrp-compliant' : 'hsrp-non-compliant'}`} style={{ padding: '2px 8px', fontSize: '0.75rem' }}>
+                              {isHsrp ? 'Compliant' : 'Non-HSRP'}
+                            </span>
+                          </td>
+                          <td>
+                            <div className="table-badge-list">
+                              {v.violations && v.violations.length > 0 ? (
+                                v.violations.map((tag, i) => (
+                                  <span key={i} className="table-tag">{tag}</span>
+                                ))
+                              ) : (
+                                <span className="table-tag" style={{ color: 'var(--severity-low)', borderColor: 'rgba(34, 197, 94, 0.2)', background: 'rgba(34, 197, 94, 0.05)' }}>
+                                  NONE
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan="5" style={{ textGrid: 'center', padding: '30px', color: 'var(--text-muted)' }}>
+                        No violation records logged.
                       </td>
                     </tr>
-                  );
-                })
-              ) : (
-                <tr>
-                  <td colSpan="5" style={{ textGrid: 'center', padding: '30px', color: 'var(--text-muted)' }}>
-                    No violation records logged.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      </section>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </>
+      ) : (
+        <ModelPerformanceView />
+      )}
     </div>
   );
 };

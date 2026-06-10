@@ -1,7 +1,9 @@
 import React from 'react';
 import { Calendar, Tag, ShieldCheck, ShieldAlert, Trash2 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 
-const ViolationCard = ({ violation, onDelete }) => {
+const ViolationCard = ({ violation, onDelete, onClick }) => {
+  const { user } = useAuth();
   const { id, imageUrl, plateNumber, severity, violations, timestamp, hsrpStatus } = violation;
 
   const getImageUrl = (path) => {
@@ -47,7 +49,7 @@ const ViolationCard = ({ violation, onDelete }) => {
   const isHsrp = hsrpStatus === 'HSRP' || hsrpStatus === true || hsrpStatus?.toString()?.toUpperCase() === 'COMPLIANT';
 
   return (
-    <div className="violation-card">
+    <div className="violation-card" onClick={onClick} style={{ cursor: 'pointer' }}>
       <div className="violation-card-img-container">
         <img 
           src={getImageUrl(imageUrl)} 
@@ -68,13 +70,18 @@ const ViolationCard = ({ violation, onDelete }) => {
       <div className="violation-card-body">
         <div className="violation-card-header">
           <h3 className="plate-number-display">{plateNumber || 'NO PLATE'}</h3>
-          <button 
-            onClick={() => onDelete && onDelete(id)} 
-            className="delete-violation-btn" 
-            title="Delete Record"
-          >
-            <Trash2 size={16} />
-          </button>
+          {user?.role === 'admin' && (
+            <button 
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete && onDelete(id);
+              }} 
+              className="delete-violation-btn" 
+              title="Delete Record"
+            >
+              <Trash2 size={16} />
+            </button>
+          )}
         </div>
 
         <div className="violation-info-grid">

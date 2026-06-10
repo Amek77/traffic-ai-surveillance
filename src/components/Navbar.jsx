@@ -77,6 +77,15 @@ const Navbar = () => {
               <Upload size={18} />
               <span>Upload & Detect</span>
             </NavLink>
+            {user?.role === 'admin' && (
+              <NavLink 
+                to="/operators" 
+                className={({ isActive }) => isActive ? 'nav-link active' : 'nav-link'}
+              >
+                <User size={18} />
+                <span>Manage Operators</span>
+              </NavLink>
+            )}
           </div>
         )}
 

@@ -7,6 +7,7 @@ import LoginPage from './pages/LoginPage';
 import Dashboard from './pages/Dashboard';
 import Violations from './pages/Violations';
 import UploadDetect from './pages/UploadDetect';
+import Operators from './pages/Operators';
 
 function App() {
   return (
@@ -40,6 +41,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <UploadDetect />
+              </ProtectedRoute>
+            } 
+          />
+          <Route 
+            path="/operators" 
+            element={
+              <ProtectedRoute adminOnly={true}>
+                <Operators />
               </ProtectedRoute>
             } 
           />

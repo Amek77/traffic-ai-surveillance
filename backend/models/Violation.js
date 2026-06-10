@@ -46,6 +46,23 @@ const ViolationSchema = new mongoose.Schema({
     type: Array,
     default: []
   },
+  location: {
+    latitude: { type: Number, default: 17.3850 },
+    longitude: { type: Number, default: 78.4867 },
+    address: { type: String, default: 'Challan Checkpoint, Hyderabad, India' }
+  },
+  ai_analysis: {
+    type: String,
+    default: ''
+  },
+  fine_amount: {
+    type: Number,
+    default: 0
+  },
+  fine_breakdown: {
+    type: Array,
+    default: []
+  },
   frame_id: {
     type: Number,
     default: 0

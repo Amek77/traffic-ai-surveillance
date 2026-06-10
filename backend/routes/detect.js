@@ -42,10 +42,10 @@ const upload = multer({
 });
 
 // Promise wrapper to execute the Python pipeline
-const runPythonPipeline = (imagePath, modelPath) => {
+const runPythonPipeline = (imagePath, modelPath, hsrpModelPath) => {
   return new Promise((resolve, reject) => {
     const scriptPath = path.join(__dirname, '../python/pipeline.py');
-    const args = ['--image', imagePath, '--model', modelPath];
+    const args = ['--image', imagePath, '--model', modelPath, '--hsrp-model', hsrpModelPath];
     
     // Spawn python (Windows standard)
     const pyProcess = spawn('python', [scriptPath, ...args]);
@@ -135,9 +135,10 @@ router.post('/image', protect, (req, res) => {
     try {
       const filePath = req.file.path;
       const modelPath = path.join(__dirname, '../model/best.pt');
+      const hsrpModelPath = path.join(__dirname, '../model/hsrp_classifier.pth');
       
       // Execute Python YOLOv8 + OCR + HSRP pipeline
-      const results = await runPythonPipeline(filePath, modelPath);
+      const results = await runPythonPipeline(filePath, modelPath, hsrpModelPath);
 
       // Map results to model format
       // hsrp_status mapping: python script outputs 'hsrp' or 'non-hsrp'
@@ -148,6 +149,68 @@ router.post('/image', protect, (req, res) => {
       } else if (rawHsrp?.includes('hsrp') || rawHsrp?.includes('compliant')) {
         hsrpMapped = 'hsrp';
       }
+
+      // Read coordinates and address from request
+      const latitude = req.body.latitude ? parseFloat(req.body.latitude) : 17.3850;
+      const longitude = req.body.longitude ? parseFloat(req.body.longitude) : 78.4867;
+      const address = req.body.address || 'Challan Checkpoint, Hyderabad, India';
+
+      // Calculate fines
+      const violationsList = results.violations || [];
+      let fineAmount = 0;
+      const fineBreakdown = [];
+
+      if (violationsList.includes('NO HELMET')) {
+        fineAmount += 1000;
+        fineBreakdown.push({
+          violation: 'NO HELMET',
+          section: 'Section 194D (MVA)',
+          amount: 1000,
+          penalty: '₹1,000 fine + 3 months license suspension recommendation'
+        });
+      }
+
+      if (violationsList.includes('TRIPLE RIDING')) {
+        fineAmount += 1000;
+        fineBreakdown.push({
+          violation: 'TRIPLE RIDING',
+          section: 'Section 194C (MVA)',
+          amount: 1000,
+          penalty: '₹1,000 fine + 3 months license disqualification'
+        });
+      }
+
+      if (violationsList.includes('NON HSRP')) {
+        fineAmount += 5000;
+        fineBreakdown.push({
+          violation: 'NON HSRP',
+          section: 'Section 192 (MVA)',
+          amount: 5000,
+          penalty: '₹5,000 fine for registration plate violation'
+        });
+      }
+
+      // Generate AI analysis text
+      const generateAIAnalysis = (violations, plate, severity) => {
+        if (violations.length === 0) {
+          return `AI System Analysis: Vehicle with plate number "${plate}" was scanned at the checkpoint. The system confirms full compliance: all occupants are wearing protective helmets, occupancy count matches safety thresholds, and the license plate adheres to High-Security Registration Plate (HSRP) regulations. No offenses recorded.`;
+        }
+        let narrative = `AI System Analysis: Vehicle "${plate}" was flagged at the checkpoint with a ${severity} severity rating. The automated scanner logged the following infraction(s): `;
+        const details = [];
+        if (violations.includes('NO HELMET')) {
+          details.push(`occupants riding without a safety helmet (violating Section 129 read with 194D of the Motor Vehicles Act, which carries a ₹1,000 fine and license suspension)`);
+        }
+        if (violations.includes('TRIPLE RIDING')) {
+          details.push(`over-occupancy with three or more individuals on a two-wheeler (violating Section 128 read with 194C of the Motor Vehicles Act, carrying a ₹1,000 fine and license disqualification)`);
+        }
+        if (violations.includes('NON HSRP')) {
+          details.push(`a non-compliant registration plate that does not meet the High Security Registration Plate (HSRP) guidelines mandated under Section 39 read with 192 of the Motor Vehicles Act, carrying a standard ₹5,000 penalty)`);
+        }
+        narrative += details.join(', and ') + `. The cumulative fine of ₹${fineAmount} has been generated, and an automated challan is recommended for immediate review.`;
+        return narrative;
+      };
+
+      const aiAnalysis = generateAIAnalysis(violationsList, results.plate_number || 'NOT FOUND', results.severity || 'NONE');
 
       // Save violation record to MongoDB
       const relativePath = `/uploads/${path.basename(filePath)}`;
@@ -160,10 +223,18 @@ router.post('/image', protect, (req, res) => {
         helmet: results.helmet_status === 'OK',
         triple_riding: results.triple_riding === 'VIOLATION',
         hsrp_status: hsrpMapped,
-        violations: results.violations || [],
+        violations: violationsList,
         severity: results.severity || 'NONE',
         confidence: results.confidence || 0,
         detections: results.detections || [],
+        location: {
+          latitude,
+          longitude,
+          address
+        },
+        ai_analysis: aiAnalysis,
+        fine_amount: fineAmount,
+        fine_breakdown: fineBreakdown,
         created_by: req.user._id
       });
 
@@ -192,7 +263,11 @@ router.post('/image', protect, (req, res) => {
           hsrp_status: results.hsrp_status,
           violations: violation.violations,
           severity: violation.severity,
-          detections: violation.detections
+          detections: violation.detections,
+          location: violation.location,
+          ai_analysis: violation.ai_analysis,
+          fine_amount: violation.fine_amount,
+          fine_breakdown: violation.fine_breakdown
         }
       });
 

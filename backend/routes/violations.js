@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Violation = require('../models/Violation');
 const Log = require('../models/Log');
-const { protect } = require('../middleware/authMiddleware');
+const { protect, adminOnly } = require('../middleware/authMiddleware');
 
 // @route   GET /api/violations
 // @desc    Get paginated violations with filters
@@ -67,8 +67,8 @@ router.get('/', protect, async (req, res) => {
 
 // @route   GET /api/violations/export/csv
 // @desc    Export violations as CSV
-// @access  Private
-router.get('/export/csv', protect, async (req, res) => {
+// @access  Private/Admin
+router.get('/export/csv', protect, adminOnly, async (req, res) => {
   try {
     const { severity, type, startDate, endDate } = req.query;
 
@@ -142,8 +142,8 @@ router.get('/:id', protect, async (req, res) => {
 
 // @route   DELETE /api/violations/:id
 // @desc    Delete a violation record
-// @access  Private
-router.delete('/:id', protect, async (req, res) => {
+// @access  Private/Admin
+router.delete('/:id', protect, adminOnly, async (req, res) => {
   try {
     const violation = await Violation.findById(req.params.id);
 

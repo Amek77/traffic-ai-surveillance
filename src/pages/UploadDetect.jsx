@@ -1,5 +1,6 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import api from '../api/axios';
+import { exportViolationPDF } from '../utils/exportPDF';
 import { 
   UploadCloud, 
   X, 
@@ -9,9 +10,8 @@ import {
   ShieldAlert, 
   AlertTriangle,
   Database,
-  User,
-  CreditCard,
-  FileText
+  FileText,
+  Download
 } from 'lucide-react';
 
 const UploadDetect = () => {
@@ -26,12 +26,64 @@ const UploadDetect = () => {
   const [isUsingMock, setIsUsingMock] = useState(false);
   const [simulationReason, setSimulationReason] = useState('');
 
+  const [latitude, setLatitude] = useState(17.3850);
+  const [longitude, setLongitude] = useState(78.4867);
+  const [address, setAddress] = useState('Challan Checkpoint, Hyderabad, India');
+
   const [hoveredDet, setHoveredDet] = useState(null);
   const [showHelmetLayer, setShowHelmetLayer] = useState(true);
   const [showPlateLayer, setShowPlateLayer] = useState(true);
   const [showRiderLayer, setShowRiderLayer] = useState(true);
 
+  const mapRef = useRef(null);
+  const markerRef = useRef(null);
   const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    if (!imagePreview || !window.L) return;
+    
+    const timer = setTimeout(() => {
+      const container = document.getElementById('checkpoint-map');
+      if (container && !mapRef.current) {
+        const map = window.L.map('checkpoint-map').setView([latitude, longitude], 13);
+        window.L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        const marker = window.L.marker([latitude, longitude], { draggable: true }).addTo(map);
+
+        marker.on('dragend', async () => {
+          const latlng = marker.getLatLng();
+          setLatitude(latlng.lat);
+          setLongitude(latlng.lng);
+          
+          try {
+            const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latlng.lat}&lon=${latlng.lng}&zoom=18`);
+            const data = await res.json();
+            if (data && data.display_name) {
+              setAddress(data.display_name);
+            } else {
+              setAddress(`Challan Checkpoint, Lat: ${latlng.lat.toFixed(4)}, Lng: ${latlng.lng.toFixed(4)}`);
+            }
+          } catch (e) {
+            setAddress(`Challan Checkpoint, Lat: ${latlng.lat.toFixed(4)}, Lng: ${latlng.lng.toFixed(4)}`);
+          }
+        });
+
+        mapRef.current = map;
+        markerRef.current = marker;
+      }
+    }, 100);
+
+    return () => {
+      clearTimeout(timer);
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+        markerRef.current = null;
+      }
+    };
+  }, [imagePreview]);
 
   const handleDrag = (e) => {
     e.preventDefault();
@@ -89,6 +141,9 @@ const UploadDetect = () => {
     setIsUsingMock(false);
     setSimulationReason('');
     setHoveredDet(null);
+    setLatitude(17.3850);
+    setLongitude(78.4867);
+    setAddress('Challan Checkpoint, Hyderabad, India');
   };
 
   const normalizeResults = (raw) => {
@@ -118,6 +173,22 @@ const UploadDetect = () => {
       }
     }
 
+    const mappedDetections = (data.detections || []).map(det => {
+      if (det.box) return det;
+      if (det.bbox && Array.isArray(det.bbox) && det.bbox.length === 4) {
+        return {
+          ...det,
+          box: {
+            y: det.bbox[0], // top_pct
+            x: det.bbox[1], // left_pct
+            w: det.bbox[2], // width_pct
+            h: det.bbox[3]  // height_pct
+          }
+        };
+      }
+      return det;
+    });
+
     return {
       plateNumber: data.plate_number || data.plateNumber || 'NOT FOUND',
       helmetStatus: helmet,
@@ -125,7 +196,10 @@ const UploadDetect = () => {
       hsrpStatus: hsrp,
       violations: data.violations || [],
       severity: data.severity || 'NONE',
-      detections: data.detections || []
+      detections: mappedDetections,
+      fineAmount: data.fine_amount || data.fineAmount || 0,
+      fineBreakdown: data.fine_breakdown || data.fineBreakdown || [],
+      aiAnalysis: data.ai_analysis || data.aiAnalysis || ''
     };
   };
 
@@ -139,6 +213,9 @@ const UploadDetect = () => {
 
     const formData = new FormData();
     formData.append("image", selectedFile);
+    formData.append("latitude", latitude);
+    formData.append("longitude", longitude);
+    formData.append("address", address);
 
     try {
       const response = await api.post('/detect/image', formData, {
@@ -151,6 +228,12 @@ const UploadDetect = () => {
         setIsUsingMock(false);
         setResults(normalizeResults(response.data));
         setSuccessMsg("Saved to database");
+        
+        // Update preview image to show the annotated version from the backend
+        if (response.data.data && response.data.data.image_path) {
+          const backendUrl = api.defaults.baseURL.replace('/api', '') + response.data.data.image_path;
+          setImagePreview(backendUrl);
+        }
       }
     } catch (err) {
       console.warn("Detection API error, initializing local simulation:", err);
@@ -221,7 +304,50 @@ const UploadDetect = () => {
       const randomIndex = Math.floor(Math.random() * mockTypes.length);
       const chosenResult = mockTypes[randomIndex];
 
-      setResults(normalizeResults(chosenResult));
+      // Simulated calculations
+      const violationsList = chosenResult.violations || [];
+      let fineAmount = 0;
+      const fineBreakdown = [];
+      if (violationsList.includes('NO HELMET')) {
+        fineAmount += 1000;
+        fineBreakdown.push({
+          violation: 'NO HELMET',
+          section: 'Section 194D (MVA)',
+          amount: 1000,
+          penalty: '₹1,000 fine + 3 months license suspension recommendation'
+        });
+      }
+      if (violationsList.includes('TRIPLE RIDING')) {
+        fineAmount += 1000;
+        fineBreakdown.push({
+          violation: 'TRIPLE RIDING',
+          section: 'Section 194C (MVA)',
+          amount: 1000,
+          penalty: '₹1,000 fine + 3 months license disqualification'
+        });
+      }
+      if (violationsList.includes('NON HSRP') || chosenResult.hsrpStatus === 'non-hsrp') {
+        fineAmount += 5000;
+        fineBreakdown.push({
+          violation: 'NON HSRP',
+          section: 'Section 192 (MVA)',
+          amount: 5000,
+          penalty: '₹5,000 fine for registration plate violation'
+        });
+      }
+
+      const mockAiAnalysis = violationsList.length === 0
+        ? `AI System Analysis: Vehicle with plate number "${chosenResult.plateNumber}" was scanned at checkpoint "${address}". The system confirms full compliance: all occupants are wearing protective helmets, occupancy count matches safety thresholds, and the license plate adheres to HSRP regulations. No offenses recorded.`
+        : `AI System Analysis: Vehicle "${chosenResult.plateNumber}" was flagged at checkpoint "${address}" with a ${chosenResult.severity} severity rating. Infraction(s) logged: ${violationsList.join(', ')}. The cumulative fine of ₹${fineAmount} has been generated, and an automated challan is recommended for immediate review.`;
+
+      const chosenResultNormalized = {
+        ...chosenResult,
+        fine_amount: fineAmount,
+        fine_breakdown: fineBreakdown,
+        ai_analysis: mockAiAnalysis
+      };
+
+      setResults(normalizeResults(chosenResultNormalized));
       setSuccessMsg("Saved to database (Simulation)");
     } finally {
       setIsDetecting(false);
@@ -315,8 +441,8 @@ const UploadDetect = () => {
                 {/* Scanning sweep bar */}
                 <div className={`scanner-sweep-line ${isDetecting ? 'active' : ''}`} />
 
-                {/* SVG Overlay for Bounding Boxes */}
-                {results && results.detections && (
+                {/* SVG Overlay for Bounding Boxes (only used in offline mock simulation) */}
+                {isUsingMock && results && results.detections && (
                   <svg 
                     style={{
                       position: 'absolute',
@@ -439,6 +565,66 @@ const UploadDetect = () => {
                 </div>
               )}
 
+              {/* Camera Tagging Map */}
+              <div style={{
+                marginTop: '20px',
+                background: 'var(--bg-subtle-strong)',
+                border: '1px solid var(--card-border)',
+                borderRadius: '8px',
+                padding: '16px',
+                textAlign: 'left'
+              }}>
+                <h3 style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '6px', textTransform: 'uppercase', letterSpacing: '0.5px', color: 'var(--text-primary)' }}>
+                  Camera Checkpoint Tag
+                </h3>
+                <div id="checkpoint-map" style={{ height: '180px', borderRadius: '6px', border: '1px solid var(--card-border)', background: '#0a0a0f', zIndex: 1, marginBottom: '12px' }} />
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', fontSize: '0.75rem' }}>
+                  <div>
+                    <label style={{ color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Latitude</label>
+                    <input 
+                      type="number" 
+                      step="0.0001"
+                      value={latitude}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value) || 0;
+                        setLatitude(val);
+                        if (markerRef.current && mapRef.current) {
+                          markerRef.current.setLatLng([val, longitude]);
+                          mapRef.current.panTo([val, longitude]);
+                        }
+                      }}
+                      style={{ width: '100%', padding: '8px', background: 'var(--input-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)', borderRadius: '6px', outline: 'none' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Longitude</label>
+                    <input 
+                      type="number" 
+                      step="0.0001"
+                      value={longitude}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value) || 0;
+                        setLongitude(val);
+                        if (markerRef.current && mapRef.current) {
+                          markerRef.current.setLatLng([latitude, val]);
+                          mapRef.current.panTo([latitude, val]);
+                        }
+                      }}
+                      style={{ width: '100%', padding: '8px', background: 'var(--input-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)', borderRadius: '6px', outline: 'none' }}
+                    />
+                  </div>
+                </div>
+                <div style={{ marginTop: '12px', fontSize: '0.75rem' }}>
+                  <label style={{ color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>Checkpoint Address / Location Name</label>
+                  <input 
+                    type="text" 
+                    value={address}
+                    onChange={(e) => setAddress(e.target.value)}
+                    style={{ width: '100%', padding: '8px', background: 'var(--input-bg)', border: '1px solid var(--card-border)', color: 'var(--text-primary)', borderRadius: '6px', outline: 'none' }}
+                  />
+                </div>
+              </div>
+
               <button 
                 type="button" 
                 onClick={handleDetect} 
@@ -464,14 +650,31 @@ const UploadDetect = () => {
 
         {/* Right Side: Analysis Panel */}
         <div className="results-panel">
-          <div className="results-header">
-            <h2 className="results-title">Analysis Results</h2>
-            {successMsg && (
-              <span className="saved-db-indicator">
-                <Database size={14} />
-                <span>{successMsg}</span>
-              </span>
-            )}
+          <div className="results-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+            <h2 className="results-title" style={{ margin: 0 }}>Analysis Results</h2>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              {results && (
+                <button 
+                  onClick={() => exportViolationPDF({
+                    ...results,
+                    timestamp: new Date().toISOString(),
+                    location: { latitude, longitude, address }
+                  })} 
+                  className="filter-export-btn"
+                  style={{ height: '32px', padding: '0 12px', fontSize: '0.75rem', gap: '6px' }}
+                  title="Download PDF Challan"
+                >
+                  <Download size={12} />
+                  <span>Download PDF</span>
+                </button>
+              )}
+              {successMsg && (
+                <span className="saved-db-indicator">
+                  <Database size={14} />
+                  <span>{successMsg}</span>
+                </span>
+              )}
+            </div>
           </div>
 
           {isDetecting ? (
@@ -608,6 +811,93 @@ const UploadDetect = () => {
                     </span>
                   )}
                 </div>
+              </div>
+
+              {/* Logged Camera Location */}
+              <div className="analytics-card-row" style={{ animationDelay: '440ms', flexDirection: 'column', alignItems: 'flex-start', gap: '8px', textAlign: 'left' }}>
+                <div className="analytics-label-section">
+                  <span className="analytics-title-text">Logged Camera Coordinates</span>
+                  <span className="analytics-desc-text">GPS tagging parameters</span>
+                </div>
+                <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '4px', width: '100%' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <span>Latitude:</span>
+                    <strong style={{ color: 'var(--text-primary)' }}>{latitude.toFixed(6)}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px' }}>
+                    <span>Longitude:</span>
+                    <strong style={{ color: 'var(--text-primary)' }}>{longitude.toFixed(6)}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'flex-start' }}>
+                    <span style={{ minWidth: '70px' }}>Address:</span>
+                    <strong style={{ color: 'var(--text-primary)', textAlign: 'right', wordBreak: 'break-word', fontSize: '0.75rem' }}>{address}</strong>
+                  </div>
+                </div>
+              </div>
+
+              {/* Fines Breakdown Table */}
+              <div className="analytics-card-row" style={{ animationDelay: '480ms', flexDirection: 'column', alignItems: 'stretch', gap: '12px', textAlign: 'left' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div className="analytics-label-section">
+                    <span className="analytics-title-text">Motor Vehicle Act Challan</span>
+                    <span className="analytics-desc-text">Indian standard legal fines</span>
+                  </div>
+                  <span style={{ fontSize: '1.2rem', fontWeight: 'bold', color: 'var(--primary-light)' }}>
+                    ₹{(results.fineAmount || 0).toLocaleString('en-IN')}
+                  </span>
+                </div>
+                
+                {results.fineBreakdown && results.fineBreakdown.length > 0 ? (
+                  <div style={{ overflowX: 'auto', marginTop: '6px' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid var(--card-border)', textAlign: 'left' }}>
+                          <th style={{ padding: '6px 8px', fontWeight: 600 }}>Violation</th>
+                          <th style={{ padding: '6px 8px', fontWeight: 600 }}>Section</th>
+                          <th style={{ padding: '6px 8px', fontWeight: 600, textAlign: 'right' }}>Fine</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {results.fineBreakdown.map((item, idx) => (
+                          <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                            <td style={{ padding: '8px', color: 'var(--text-primary)', fontWeight: 500 }}>{item.violation}</td>
+                            <td style={{ padding: '8px' }}>{item.section}</td>
+                            <td style={{ padding: '8px', textAlign: 'right', color: 'var(--text-primary)', fontWeight: 'bold' }}>₹{item.amount}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div style={{ padding: '10px', background: 'rgba(34, 197, 94, 0.05)', border: '1px solid rgba(34, 197, 94, 0.15)', borderRadius: '6px', fontSize: '0.75rem', color: '#86efac', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <ShieldCheck size={14} />
+                    <span>No penal fines applicable. Compliant transit.</span>
+                  </div>
+                )}
+              </div>
+
+              {/* AI Narrative Summary Card */}
+              <div className="analytics-card-row" style={{ animationDelay: '520ms', flexDirection: 'column', alignItems: 'stretch', gap: '10px', textAlign: 'left' }}>
+                <div className="analytics-label-section">
+                  <span className="analytics-title-text" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <FileText size={16} className="logo-accent" />
+                    <span>AI Safety Narrative</span>
+                  </span>
+                  <span className="analytics-desc-text">Automated case description</span>
+                </div>
+                <p style={{
+                  fontSize: '0.8rem',
+                  lineHeight: '1.5',
+                  color: 'var(--text-secondary)',
+                  background: 'var(--bg-subtle-strong)',
+                  padding: '12px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--card-border)',
+                  margin: '4px 0 0 0',
+                  fontStyle: 'italic'
+                }}>
+                  {results.aiAnalysis}
+                </p>
               </div>
             </div>
           ) : (
